@@ -1,44 +1,55 @@
 # -*- coding: utf-8 -*-
-#------------------------------------------------------------
-# pelisalacarta - XBMC Plugin
+# ------------------------------------------------------------
+# pelisalacarta
 # MCT - Mini Cliente Torrent para pelisalacarta
 # http://blog.tvalacarta.info/plugin-xbmc/pelisalacarta/
-#------------------------------------------------------------
-import urlparse,urllib2,urllib,re
-import os
-import sys
+# ------------------------------------------------------------
 
+import os, re
 import shutil, tempfile
+import urllib, urllib2
+from contextlib import closing
+import zlib
 
-import libtorrent as lt
-
-import xbmc
-import xbmcgui
-
+from core import config, scrapertools
 from platformcode import library
+import xbmc, xbmcgui
 
-from core import scrapertools
-from core import config
-from core import jsontools
+try:
+    from lib.python_libtorrent import get_libtorrent, get_platform
+    lt = get_libtorrent()
+except:
+    import libtorrent as lt
 
-def play(url, is_view=None):
+def play(url, xlistitem={}, is_view=None, subtitle=""):
+
+    allocate = True
+    try:
+        _platform = get_platform()
+        if str(_platform['system']) in ["android_armv7", "linux_armv6", "linux_armv7"]:
+            allocate = False
+    except: pass
+
+    if url.startswith("http://adf.ly/"):
+        ddd = xbmcgui.Dialog()
+        ddd.ok("pelisalacarta-MCT: Sin soporte adf.ly", "El script no tiene soporte para el acortador de urls adf.ly.", "", "url: " + url)
+        return
 
     if not url.endswith(".torrent") and not url.startswith("magnet"):
         t_file = scrapertools.get_header_from_response(url, header_to_get="location")
         if len(t_file) > 0:
             url = t_file
             t_file = scrapertools.get_header_from_response(url, header_to_get="location")
-        if len(t_file) > 0:
-            url = t_file
+        if len(t_file) > 0: url = t_file
 
-    save_path_videos = os.path.join( config.get_setting("downloadpath") , "torrent-videos" )
-    save_path_torrents = os.path.join( config.get_setting("downloadpath") , "torrent-torrents" )
+    save_path_videos = os.path.join(config.get_setting("downloadpath") , "torrent-videos")
+    save_path_torrents = os.path.join(config.get_setting("downloadpath") , "torrent-torrents")
     if not os.path.exists( save_path_torrents ): os.mkdir(save_path_torrents)
 
     if not os.path.isfile(url) and not url.startswith("magnet"):
         data = url_get(url)
-        re_name = library.title_to_folder_name( urllib.unquote( scrapertools.get_match(data,':name\d+:(.*?)\d+:') ) )
-        torrent_file = os.path.join(save_path_torrents, re_name+'.torrent')
+        re_name = library.title_to_folder_name(urllib.unquote(scrapertools.get_match(data, ':name\d+:(.*?)\d+:')))
+        torrent_file = os.path.join(save_path_torrents, unicode(re_name, "'utf-8'", errors="replace")+'.torrent')
 
         f = open(torrent_file,'wb')
         f.write(data)
@@ -88,7 +99,6 @@ def play(url, is_view=None):
     ]
 
     video_file = ""
-
     if torrent_file.startswith("magnet"):
         tempdir = tempfile.mkdtemp()
         params = {
@@ -101,14 +111,22 @@ def play(url, is_view=None):
         }
         h = lt.add_magnet_uri(ses, torrent_file, params)
         dp = xbmcgui.DialogProgress()
+        h.force_reannounce()
+        h.force_dht_announce()
         dp.create('pelisalacarta-MCT')
         while not h.has_metadata():
             message, porcent, msg_file, s, download = getProgress(h, "Creando torrent desde magnet")
             dp.update(porcent, message, msg_file)
+            if s.state == 1: download = 1
+            if dp.iscanceled():
+                dp.close()
+                remove_files(download, torrent_file, video_file, ses, h)
+                return
         dp.close()
         info = h.get_torrent_info()
-        data = lt.bencode( lt.create_torrent(info).generate() )
-        torrent_file = os.path.join(save_path_torrents, info.name() + ".torrent")
+        data = lt.bencode(lt.create_torrent(info).generate())
+
+        torrent_file = os.path.join(save_path_torrents, unicode(info.name(), "'utf-8'", errors="replace") + ".torrent")
         f = open(torrent_file,'wb')
         f.write(data)
         f.close()
@@ -120,17 +138,17 @@ def play(url, is_view=None):
 
     _index_file, _video_file, _size_file = get_video_file(info)
 
-    if not _video_file.endswith('.avi'):
-        h = ses.add_torrent( { 'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_sparse } )
+    _video_file_ext = os.path.splitext( _video_file )[1]
+    if (_video_file_ext == ".avi" or _video_file_ext == ".mp4") and allocate:
+        h = ses.add_torrent({'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_allocate})
     else:
-        h = ses.add_torrent( { 'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_allocate } )
+        h = ses.add_torrent({'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_sparse})
 
     h.set_sequential_download(True)
-
     h.force_reannounce()
     h.force_dht_announce()
 
-    _index, video_file, video_size = get_video_files_sizes( info )
+    _index, video_file, video_size = get_video_files_sizes(info)
     if _index == -1:
         _index = _index_file
         video_file = _video_file
@@ -140,35 +158,57 @@ def play(url, is_view=None):
     is_greater_num_pieces_plus = False
     is_greater_num_pieces_pause = False
 
-    porcent4first_pieces = int( video_size / 1073741824 )
+    porcent4first_pieces = int(video_size * 0.000000005)
     if porcent4first_pieces < 10: porcent4first_pieces = 10
-    if porcent4first_pieces > 50: porcent4first_pieces = 50
-    num_pieces_to_resume = int( video_size / 2147483648 )
-    if num_pieces_to_resume < 5: num_pieces_to_resume = 5
-    if num_pieces_to_resume > 10: num_pieces_to_resume = 10
+    if porcent4first_pieces > 100: porcent4first_pieces = 100
+    porcent4last_pieces = int(porcent4first_pieces/2)
 
-    piece_set = set_priority_pieces(h, _index, video_file, video_size)
+    num_pieces_to_resume = int(video_size * 0.0000000025)
+    if num_pieces_to_resume < 5: num_pieces_to_resume = 5
+    if num_pieces_to_resume > 25: num_pieces_to_resume = 25
+
+    piece_set = set_priority_pieces(h, _index, video_file, video_size, porcent4first_pieces, porcent4last_pieces, allocate)
 
     dp = xbmcgui.DialogProgress()
     dp.create('pelisalacarta-MCT')
 
+    _pieces_info = {}
+
     while not h.is_seed():
         s = h.status()
+
         xbmc.sleep(100)
-        message, porcent, msg_file, s, download = getProgress(h, video_file)
+        message, porcent, msg_file, s, download = getProgress(h, video_file, _pf=_pieces_info)
 
         if s.state == 1: download = 1
-
         first_pieces = True
-        for i in range( piece_set[0], piece_set[porcent4first_pieces] ):
+        _c = 0
+        for i in range(piece_set[0], piece_set[porcent4first_pieces]):
             first_pieces&= h.have_piece(i)
+            if h.have_piece(i): _c+= 1
+        _pieces_info = {'current': 0, 'continuous': "%s/%s" % (_c,porcent4first_pieces), 'continuous2': "", 'have': h.status().num_pieces, 'len': len(piece_set)}
 
-        if is_view != "Ok" and first_pieces:
+        last_pieces = True
+        if not allocate:
+            _c = len(piece_set)-1; _cc = 0
+            for i in range(len(piece_set)-porcent4last_pieces,len(piece_set)):
+                last_pieces &= h.have_piece(i)
+                if h.have_piece(i): _c-= 1; _cc+=1
+            _pieces_info['continuous2'] = "[%s/%s] " % (_cc,porcent4last_pieces)
+
+        if is_view != "Ok" and first_pieces and last_pieces:
+            _pieces_info['continuous2'] = ""
             is_view = "Ok"
             dp.close()
 
-            player = play_video()
-            player.play( os.path.join( save_path_videos, video_file ) )
+            playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
+            playlist.clear()
+
+            ren_video_file = os.path.join(save_path_videos, video_file)
+            playlist.add(ren_video_file, xlistitem)
+
+            player = play_video(xbmc.PLAYER_CORE_AUTO)
+            player.play(playlist)
 
             is_greater_num_pieces_canceled = 0
             continuous_pieces = 0
@@ -176,15 +216,23 @@ def play(url, is_view=None):
             current_piece = 0
 
             not_resume = True
+            _sub = False
 
             while player.isPlaying():
                 xbmc.sleep(100)
+
+                if subtitle!="" and not _sub:
+                    _sub = True
+                    player.setSubtitles(subtitle)
+
                 if not_resume:
                     player.seekTime(0)
                     not_resume = False
 
                 continuous_pieces = count_completed_continuous_pieces(h, piece_set)
+
                 if xbmc.Player().isPlaying():
+
                     porcent_time = player.getTime() / player.getTotalTime() * 100
                     current_piece = int( porcent_time / 100 * len(piece_set) )
 
@@ -206,7 +254,7 @@ def play(url, is_view=None):
                         player.setDialogoProgress()
 
                     if not h.is_seed():
-                        message, porcent, msg_file, s, download = getProgress(h, video_file)
+                        message, porcent, msg_file, s, download = getProgress(h, video_file, _pf=_pieces_info)
                         dp.update(porcent, message, msg_file)
                     else:
                         dp.update(100, "Descarga completa: " + video_file)
@@ -237,43 +285,46 @@ def play(url, is_view=None):
                 ok = d.yesno('pelisalacarta-MCT', 'XBMC-Kodi Cerró el vídeo.', '¿Continuar con la sesión?')
             else: ok = False
 
-            if ok:
-                is_view=None
+            if ok: is_view = None
             else:
-                _index, video_file, video_size = get_video_files_sizes( info )
+                _index, video_file, video_size = get_video_files_sizes(info)
                 if _index == -1 or info.num_files() == 1:
-                    remove_files( download, torrent_file, video_file, ses, h )
+                    remove_files(download, torrent_file, video_file, ses, h)
                     return
                 else:
-                    piece_set = set_priority_pieces(h, _index, video_file, video_size)
-                    is_view=None
+                    piece_set = set_priority_pieces(h, _index, video_file, video_size, porcent4first_pieces, porcent4last_pieces, allocate)
+                    is_view = None
                     dp = xbmcgui.DialogProgress()
                     dp.create('pelisalacarta-MCT')
 
-        if is_view != "Ok" :
-            dp.update(porcent, message, msg_file)
+        if is_view != "Ok": dp.update(porcent, message, msg_file)
 
         if dp.iscanceled():
             dp.close()
-            _index, video_file, video_size = get_video_files_sizes( info )
+            _index, video_file, video_size = get_video_files_sizes(info)
             if _index == -1 or info.num_files() == 1:
-                remove_files( download, torrent_file, video_file, ses, h )
+                remove_files(download, torrent_file, video_file, ses, h)
                 return
             else:
-                piece_set = set_priority_pieces(h, _index, video_file, video_size)
+                piece_set = set_priority_pieces(h, _index, video_file, video_size, porcent4first_pieces, porcent4last_pieces, allocate)
                 is_view=None
                 dp = xbmcgui.DialogProgress()
                 dp.create('pelisalacarta-MCT')
 
     if is_view == "Ok" and not xbmc.Player().isPlaying():
         dp.close()
-        remove_files( download, torrent_file, video_file, ses, h )
+        remove_files(download, torrent_file, video_file, ses, h)
 
     return
 
-def getProgress(h, video_file):
+def getProgress(h, video_file, _pf={}):
+
+    if len(_pf) > 0:
+        _pf_msg = "[%s] [%s] %s[%s] [%s]" % (_pf['current'], _pf['continuous'], _pf['continuous2'], _pf['have'], _pf['len'])
+    else: _pf_msg = ""
 
     s = h.status()
+
     state_str = ['queued', 'checking', 'downloading metadata', \
         'downloading', 'finished', 'seeding', 'allocating', 'checking fastresume']
 
@@ -285,13 +336,17 @@ def getProgress(h, video_file):
     download = ( s.progress * 100 )
 
     if "/" in video_file: video_file = video_file.split("/")[1]
-    msg_file = "..../"+video_file + " (%.2f)" % (s.total_wanted/1048576.0)
+    msg_file = video_file
+
+    if len(msg_file) > 50:
+        msg_file = msg_file.replace( video_file, os.path.splitext(video_file)[0][:40] + "... " + os.path.splitext(video_file)[1] )
+    msg_file = msg_file + "[CR]" + "%.2f MB" % (s.total_wanted/1048576.0) + " - " + _pf_msg
 
     return (message, porcent, msg_file, s, download)
 
 class play_video(xbmc.Player):
 
-    def __init__( self, *args, **kwargs ):
+    def __init__(self, *args, **kwargs):
         self.paused = False
         self.resumed = True
         self.statusDialogoProgress = False
@@ -318,7 +373,7 @@ class play_video(xbmc.Player):
     def is_ended(self):
         self.ended = True
 
-def get_video_file( info ):
+def get_video_file(info):
     size_file = 0
     for i, f in enumerate(info.files()):
         if f.size > size_file:
@@ -327,38 +382,24 @@ def get_video_file( info ):
             index_file = i
     return index_file, video_file, size_file
 
-def get_video_files_sizes( info ):
+def get_video_files_sizes(info):
 
     opciones = []
     vfile_name = {}
     vfile_size = {}
 
-    for i, f in enumerate( info.files() ):
-        _title = f.path.decode('utf-8')
-        _title = re.sub(r'(.*? )- Temporada (\d+) Completa(.*?)',
-                        r'\1T\2\3',
-                        _title)
-        info.rename_file( i, _title )
-
-    for i, f in enumerate( info.files() ):
+    for i, f in enumerate(info.files()):
         _index = int(i)
         _title = f.path.replace("\\","/")
         _size = f.size
         _offset = f.offset
 
-        _file_name = os.path.splitext( _title )[0]
+        _file_name = os.path.splitext(_title)[0]
         if "/" in _file_name: _file_name = _file_name.split('/')[1]
 
-        _file_ext = os.path.splitext( _title )[1]
+        _file_ext = os.path.splitext(_title)[1]
 
-        _caption = str(i) + \
-            " - " + \
-            _file_name + \
-            "[" + \
-            _file_ext + \
-            ":" + \
-            str(_size) + \
-            "]"
+        _caption = str(i) + " - " + _file_name + _file_ext + " - %.2f MB" % (_size / 1048576.0)
 
         vfile_name[i] = _title
         vfile_size[i] = _size
@@ -376,12 +417,12 @@ def get_video_files_sizes( info ):
 
     return seleccion, vfile_name[seleccion], vfile_size[seleccion]
 
-def remove_files( download, torrent_file, video_file, ses, h ):
+def remove_files(download, torrent_file, video_file, ses, h):
 
     dialog_view = False
     torrent = False
 
-    if os.path.isfile( torrent_file ):
+    if os.path.isfile(torrent_file):
         dialog_view = True
         torrent = True
 
@@ -395,27 +436,23 @@ def remove_files( download, torrent_file, video_file, ses, h ):
         ok = d.yesno('pelisalacarta-MCT', 'Borrar las descargas del video', video_file)
 
         if ok:
-            if torrent:
-                os.remove( torrent_file )
-            ses.remove_torrent( h, 1 )
+            if torrent: os.remove( torrent_file )
+            ses.remove_torrent(h, 1)
         else:
-            ses.remove_torrent( h )
+            ses.remove_torrent(h)
     else:
-        ses.remove_torrent( h )
+        ses.remove_torrent(h)
 
     return
 
 def url_get(url, params={}, headers={}):
-    from contextlib import closing
 
-    USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.8; rv:20.0) Gecko/20100101 Firefox/20.0"
+    user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.8; rv:20.0) Gecko/20100101 Firefox/20.0"
 
-    if params:
-        import urllib
-        url = "%s?%s" % (url, urllib.urlencode(params))
+    if params: url = "%s?%s" % (url, urllib.urlencode(params))
 
     req = urllib2.Request(url)
-    req.add_header("User-Agent", USER_AGENT)
+    req.add_header("User-Agent", user_agent)
 
     for k, v in headers.items():
         req.add_header(k, v)
@@ -424,7 +461,6 @@ def url_get(url, params={}, headers={}):
         with closing(urllib2.urlopen(req)) as response:
             data = response.read()
             if response.headers.get("Content-Encoding", "") == "gzip":
-                import zlib
                 return zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(data)
             return data
     except urllib2.HTTPError:
@@ -437,7 +473,7 @@ def count_completed_continuous_pieces(h, piece_set):
         else: not_zero = 1
     return i + not_zero
 
-def set_priority_pieces(h, _index, video_file, video_size):
+def set_priority_pieces(h, _index, video_file, video_size, porcent4first_pieces, porcent4last_pieces, allocate):
 
     for i, _set in enumerate(h.file_priorities()):
         if i != _index: h.file_priority(i,0)
@@ -446,5 +482,12 @@ def set_priority_pieces(h, _index, video_file, video_size):
     piece_set = []
     for i, _set in enumerate(h.piece_priorities()):
         if _set == 1: piece_set.append(i)
+
+    if not allocate:
+        for i in range(0,porcent4first_pieces):
+            h.set_piece_deadline(piece_set[i],10000)
+
+        for i in range(len(piece_set)-porcent4last_pieces,len(piece_set)):
+            h.set_piece_deadline(piece_set[i],10000)
 
     return piece_set
