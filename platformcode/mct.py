@@ -153,6 +153,14 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
     video_file = ""
     # -- magnet2torrent -----------------------------------------
     if torrent_file.startswith("magnet"):
+        import zlib
+        btih = hex(zlib.crc32(scrapertools.get_match(torrent_file, 'btih:([^&]+)&')) & 0xffffffff)
+        files = [f for f in os.listdir(save_path_torrents) if os.path.isfile(os.path.join(save_path_torrents, f))]
+        for file in files:
+            if btih in os.path.basename(file):
+                torrent_file = os.path.join(save_path_torrents, file)
+
+    if torrent_file.startswith("magnet"):
         tempdir = tempfile.mkdtemp()
         params = {
             'save_path': tempdir,
@@ -178,7 +186,7 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
         info = h.get_torrent_info()
         data = lt.bencode( lt.create_torrent(info).generate() )
 
-        torrent_file = os.path.join(save_path_torrents, unicode(info.name(), "'utf-8'", errors="replace") + ".torrent")
+        torrent_file = os.path.join(save_path_torrents, unicode(info.name()+"-"+btih, "'utf-8'", errors="replace") + ".torrent")
         f = open(torrent_file,'wb')
         f.write(data)
         f.close()
@@ -196,17 +204,23 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
     xbmc.log("##### Archivos ## %s ##" % len(info.files()))
     _index_file, _video_file, _size_file = get_video_file(info)
 
-    _video_file_ext = os.path.splitext( _video_file )[1]
-    xbmc.log("##### _video_file_ext ## %s ##" % _video_file_ext)
-    if (_video_file_ext == ".avi" or _video_file_ext == ".mp4") and allocate:
-        xbmc.log("##### storage_mode_t.storage_mode_allocate ("+_video_file_ext+") #####")
+    # -- Prioritarizar/Seleccionar archivo-----------------------
+    _index, video_file, video_size, len_files = get_video_files_sizes( info )
+    if len_files == 0:
+        dp = xbmcgui.Dialog().ok("No se puede reproducir", "El torrent no contiene ningún archivo de vídeo")
+
+    if _index == -1:
+        _index = _index_file
+        video_file = _video_file
+        video_size = _size_file
+
+    #_video_file_ext = os.path.splitext( _video_file )[1]
+    if video_file == ".avi" or video_file == ".mp4":
+        xbmc.log("##### storage_mode_t.storage_mode_allocate ("+video_file+") #####")
         h = ses.add_torrent( { 'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_allocate } )
     else:
-        xbmc.log("##### storage_mode_t.storage_mode_sparse ("+_video_file_ext+") #####")
+        xbmc.log("##### storage_mode: none ("+video_file+") #####")
         h = ses.add_torrent( { 'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_sparse } )
-    ## Ésto lo comento por si neno me da la bronca :)
-    #if (_video_file_ext == ".avi" or _video_file_ext == ".mp4"):
-    #    allocate = False
     # -----------------------------------------------------------
 
     # -- Descarga secuencial - trozo 1, trozo 2, ... ------------
@@ -214,13 +228,6 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
 
     h.force_reannounce()
     h.force_dht_announce()
-
-    # -- Prioritarizar/Seleccionar archivo-----------------------
-    _index, video_file, video_size = get_video_files_sizes( info )
-    if _index == -1:
-        _index = _index_file
-        video_file = _video_file
-        video_size = _size_file
 
     # -- Inicio de variables para 'pause' automático cuando el  -
     # -- el vídeo se acerca a una pieza sin completar           -
@@ -488,8 +495,8 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
                 # -- Terminar: ----------------------------------
                 # -- Comprobar si el vídeo pertenece a una ------
                 # -- lista de archivos                          -
-                _index, video_file, video_size = get_video_files_sizes( info )
-                if _index == -1 or info.num_files() == 1:
+                _index, video_file, video_size, len_files = get_video_files_sizes( info )
+                if _index == -1 or len_files == 1:
                     # -- Diálogo eliminar archivos --------------
                     remove_files( download, torrent_file, video_file, ses, h )
                     return
@@ -511,8 +518,8 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
             dp.close()
             # -- Comprobar si el vídeo pertenece a una lista de -
             # -- archivos                                       -
-            _index, video_file, video_size = get_video_files_sizes( info )
-            if _index == -1 or info.num_files() == 1:
+            _index, video_file, video_size, len_files = get_video_files_sizes( info )
+            if _index == -1 or len_files == 1:
                 # -- Diálogo eliminar archivos ------------------
                 remove_files( download, torrent_file, video_file, ses, h )
                 return
@@ -606,7 +613,7 @@ def get_video_file( info ):
 # -- Listado de selección del vídeo a prioritarizar -------------
 def get_video_files_sizes( info ):
 
-    opciones = []
+    opciones = {}
     vfile_name = {}
     vfile_size = {}
 
@@ -624,6 +631,9 @@ def get_video_files_sizes( info ):
         info.rename_file( i, _title )
     '''
 
+    extensions_list = ['.aaf', '.3gp', '.asf', '.avi', '.flv', '.mpeg',
+                       '.m1v', '.m2v', '.m4v', '.mkv', '.mov', '.mpg',
+                       '.mpe', '.mp4', '.ogg', '.rar', '.wmv', '.zip']
     for i, f in enumerate( info.files() ):
         _index = int(i)
         _title = f.path.replace("\\","/")
@@ -635,26 +645,30 @@ def get_video_files_sizes( info ):
 
         _file_ext = os.path.splitext( _title )[1]
 
-        _caption = str(i) + \
-            " - " + \
-            _file_name + _file_ext + \
-            " - %.2f MB" % (_size / 1048576.0)
+        if _file_ext in extensions_list:
+            index = len(opciones)
+            _caption = str(index) + \
+                " - " + \
+                _file_name + _file_ext + \
+                " - %.2f MB" % (_size / 1048576.0)
 
-        vfile_name[i] = _title
-        vfile_size[i] = _size
+            vfile_name[index] = _title
+            vfile_size[index] = _size
 
-        opciones.append(_caption)
+            opciones[i] = _caption
 
     if len(opciones) > 1:
         d = xbmcgui.Dialog()
-        seleccion = d.select("pelisalacarta-MCT: Lista de vídeos", opciones)
+        seleccion = d.select("pelisalacarta-MCT: Lista de vídeos", opciones.values())
     else: seleccion = 0
 
+    index = opciones.keys()[seleccion]
     if seleccion == -1:
         vfile_name[seleccion] = ""
         vfile_size[seleccion] = 0
+        index = seleccion
 
-    return seleccion, vfile_name[seleccion], vfile_size[seleccion]
+    return index, vfile_name[seleccion], vfile_size[seleccion], len(opciones)
 
 # -- Preguntar si se desea borrar lo descargado -----------------
 def remove_files( download, torrent_file, video_file, ses, h ):
