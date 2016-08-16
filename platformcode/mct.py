@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
 # ------------------------------------------------------------
-# pelisalacarta 4
+# pelisalacarta
 # Copyright 2015 tvalacarta@gmail.com
 # http://blog.tvalacarta.info/plugin-xbmc/pelisalacarta/
 #
 # Distributed under the terms of GNU General Public License v3 (GPLv3)
 # http://www.gnu.org/licenses/gpl-3.0.html
 # ------------------------------------------------------------
-# This file is part of pelisalacarta 4.
+# This file is part of pelisalacarta
 #
-# pelisalacarta 4 is free software: you can redistribute it and/or modify
+# pelisalacarta is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# pelisalacarta 4 is distributed in the hope that it will be useful,
+# pelisalacarta is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with pelisalacarta 4.  If not, see <http://www.gnu.org/licenses/>.
+# along with pelisalacarta. If not, see <http://www.gnu.org/licenses/>.
 # ------------------------------------------------------------
 # MCT - Mini Cliente Torrent para pelisalacarta
 #------------------------------------------------------------
@@ -44,8 +44,11 @@ import xbmcgui
 
 from core import config
 from core import scrapertools
-from platformcode import library
 
+try: from platformcode.library import title_to_folder_name as tf
+except:
+    try: from platformcode.library import title_to_filename as tf
+    except: from core.filetools import title_to_filename as tf
 
 def play(url, xlistitem={}, is_view=None, subtitle=""):
 
@@ -90,7 +93,7 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
         data = url_get(url)
         # -- El nombre del torrent será el que contiene en los --
         # -- datos.                                             -
-        re_name = library.title_to_folder_name( urllib.unquote( scrapertools.get_match(data,':name\d+:(.*?)\d+:') ) )
+        re_name = tf( urllib.unquote( scrapertools.get_match(data,':name\d+:(.*?)\d+:') ) )
         torrent_file = os.path.join(save_path_torrents, unicode(re_name, "'utf-8'", errors="replace")+'.torrent')
 
         f = open(torrent_file,'wb')
@@ -214,13 +217,15 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
         video_file = _video_file
         video_size = _size_file
 
-    #_video_file_ext = os.path.splitext( _video_file )[1]
-    if video_file == ".avi" or video_file == ".mp4":
-        xbmc.log("##### storage_mode_t.storage_mode_allocate ("+video_file+") #####")
+    _video_file_ext = os.path.splitext( _video_file )[1]
+    xbmc.log("##### _video_file_ext ## %s ##" % _video_file_ext)
+    if (_video_file_ext == ".avi" or _video_file_ext == ".mp4") and allocate:
+        xbmc.log("##### storage_mode_t.storage_mode_allocate ("+_video_file_ext+") #####")
         h = ses.add_torrent( { 'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_allocate } )
     else:
-        xbmc.log("##### storage_mode: none ("+video_file+") #####")
+        xbmc.log("##### storage_mode_t.storage_mode_sparse ("+_video_file_ext+") #####")
         h = ses.add_torrent( { 'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_sparse } )
+        allocate = True
     # -----------------------------------------------------------
 
     # -- Descarga secuencial - trozo 1, trozo 2, ... ------------
@@ -278,48 +283,20 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
         # -- Comprobar si se han completado las piezas para el  -
         # -- inicio del vídeo                                   -
         first_pieces = True
-        '''
-        # -- Log ---------------------------------------------- -
-        _p = ""
-        # -- -------------------------------------------------- -
-        '''
+
         _c = 0
         for i in range( piece_set[0], piece_set[porcent4first_pieces] ):
-            '''
-            # -- Log ------------------------------------------ -
-            _p+= "[%s:%s]" % ( i, h.have_piece(i) )
-            # -- ---------------------------------------------- -
-            '''
             first_pieces&= h.have_piece(i)
             if h.have_piece(i): _c+= 1
         _pieces_info = {'current': 0, 'continuous': "%s/%s" % (_c,porcent4first_pieces), 'continuous2': "", 'have': h.status().num_pieces, 'len': len(piece_set)}
-        '''
-        # -- Log ---------------------------------------------- -
-        _p = "##### first_pieces [%s/%s][%s]: " % ( _c, porcent4first_pieces, len(piece_set) ) + _p
-        xbmc.log(_p)
-        # -- -------------------------------------------------- -
-        '''
 
         last_pieces = True
         if not allocate:
-            #_p = ""
             _c = len(piece_set)-1; _cc = 0
             for i in range(len(piece_set)-porcent4last_pieces,len(piece_set)):
-                '''
-                # -- Log -------------------------------------- -
-                _p+= "[%s:%s]" % ( i, h.have_piece(i) )
-                # -- ------------------------------------------ -
-                '''
                 last_pieces &= h.have_piece(i)
                 if h.have_piece(i): _c-= 1; _cc+=1
             _pieces_info['continuous2'] = "[%s/%s] " % (_cc,porcent4last_pieces)
-            '''
-            # -- Log ------------------------------------------ -
-            _p = "##### last_pieces [%s/%s][%s]: " % ( len(piece_set)-1-porcent4last_pieces+_cc, len(piece_set)-1, len(piece_set) ) + _p
-            xbmc.log(_p)
-            # -- ---------------------------------------------- -
-            '''
-        # -- -------------------------------------------------- -
 
         if is_view != "Ok" and first_pieces and last_pieces:
             _pieces_info['continuous2'] = ""
@@ -343,6 +320,7 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
             continuous_pieces = 0
             porcent_time = 0.00
             current_piece = 0
+            set_next_continuous_pieces = porcent4first_pieces
 
             # -- Impedir que kodi haga 'resume' a un archivo ----
             # -- que se reprodujo con anterioridad y que se     -
@@ -368,7 +346,6 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
                 if not_resume:
                     player.seekTime(0)
                     not_resume = False
-                    #xbmc.sleep(1000)
 
                 # -- Control 'pause' automático                 -
                 continuous_pieces = count_completed_continuous_pieces(h, piece_set)
@@ -392,42 +369,11 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
                     if is_greater_num_pieces and not player.paused and not is_greater_num_pieces_finished:
                         is_greater_num_pieces_pause = True
                         player.pause()
-                    '''
-                    # -- Log ------------------------------------
-                    _TotalTime = player.getTotalTime()
-                    _Time = player.getTime()
-                    _print_log = "\n##### Player ##################################"
-                    _print_log+= "\nKODI:"
-                    _print_log+= "\nplayer.getTime: %s" % player_getTime
-                    _print_log+= "\nplayer.getTotalTime: %s" % player_getTotalTime
-                    _print_log+= "\n-----------------------------------------------"
-                    _print_log+= "\n-----------------------------------------------"
-                    _print_log+= "\nMCT:"
-                    _print_log+= "\nTamaño del vídeo: %s" % video_size
-                    _print_log+= "\nTotal piezas: %s" % len(piece_set)
-                    _print_log+= "\nPiezas contiguas: %s" % continuous_pieces
-                    _print_log+= "\n-----------------------------------------------"
-                    _print_log+= "\nVídeo-Total segundos: %s" % _TotalTime
-                    _print_log+= "\nVídeo-Progreso segundos: %s" % _Time
-                    _print_log+= "\nVídeo-Progreso porcentaje: %.2f%%" % porcent_time
-                    _print_log+= "\n-----------------------------------------------"
-                    _print_log+= "\ncurrent_piece: %s" % current_piece
-                    _print_log+= "\nis_greater_num_pieces: %s" % is_greater_num_pieces
-                    _print_log+= "\nis_greater_num_pieces_plus: %s" % is_greater_num_pieces_plus
-                    _print_log+= "\nis_greater_num_pieces_pause: %s" % is_greater_num_pieces_pause
-                    _print_log+= "\nis_greater_num_pieces_finished: %s" % is_greater_num_pieces_finished
-                    _print_log+= "\nPieza que se está visionando: %.2f" % ( porcent_time / 100 * len(piece_set) )
-                    _print_log+= "\nOffset que se está visionando: %.2f" % ( porcent_time / 100 * video_size )
-                    if is_greater_num_pieces and not player.paused and not is_greater_num_pieces_finished:
-                        _print_log+= "\n+++++++++++++++++++++++++++++++++++++++++++++++"
-                        _print_log+= "\nPausa con:"
-                        _print_log+= "\n    current_piece = %s" % current_piece
-                        _print_log+= "\n    continuous_pieces = %s" % continuous_pieces
-                    _print_log+= "\n###############################################"
-                    xbmc.log(_print_log)
-                    # -------------------------------------------
-                    '''
-                    #_pieces_info = {'current': current_piece, 'continuous': _pieces_info['continuous2'], 'continuous2': _pieces_info['continuous2'], 'have': h.status().num_pieces, 'len': len(piece_set)}
+
+                    if continuous_pieces >= set_next_continuous_pieces:
+                        set_next_continuous_pieces = continuous_pieces + num_pieces_to_resume
+                    next_continuous_pieces = str(continuous_pieces - current_piece) + "/" + str(set_next_continuous_pieces - current_piece)
+                    _pieces_info = {'current': current_piece, 'continuous': next_continuous_pieces , 'continuous2': _pieces_info['continuous2'], 'have': h.status().num_pieces, 'len': len(piece_set)}
 
                 # -- Cerrar el diálogo de progreso --------------
                 if player.resumed:
@@ -617,28 +563,14 @@ def get_video_files_sizes( info ):
     vfile_name = {}
     vfile_size = {}
 
-    '''
-    for i, f in enumerate( info.files() ):
-
-        _title = unicode(f.path, "iso-8859-1", errors="replace")
-        _title = unicode(f.path, "'utf-8'", errors="replace")
-        _title = re.sub(r'(.*? )- Temporada (\d+) Completa(.*?)',
-                        r'\1T\2\3',
-                        _title)
-        _title = re.sub(r'\s\([^\)]+\)|\s\-',
-                        '',
-                        _title)
-        info.rename_file( i, _title )
-    '''
-
     extensions_list = ['.aaf', '.3gp', '.asf', '.avi', '.flv', '.mpeg',
                        '.m1v', '.m2v', '.m4v', '.mkv', '.mov', '.mpg',
                        '.mpe', '.mp4', '.ogg', '.rar', '.wmv', '.zip']
+
     for i, f in enumerate( info.files() ):
         _index = int(i)
         _title = f.path.replace("\\","/")
         _size = f.size
-        _offset = f.offset
 
         _file_name = os.path.splitext( _title )[0]
         if "/" in _file_name: _file_name = _file_name.split('/')[1]
@@ -735,19 +667,6 @@ def url_get(url, params={}, headers={}):
             return data
     except urllib2.HTTPError:
         return None
-
-# -- Procedimiento para log de have_piece en las pruebas --------
-def print_have_piece_set(h, piece_set):
-    c = 0
-    _print = "\n"
-    for i, _set in enumerate(piece_set):
-        if h.have_piece(_set): _print+= "[%s]" % str(_set).zfill(5)
-        else: _print+= "[XXXXX]"
-        c+= 1
-        if c == 20:
-            c = 0
-            _print+= "\n"
-    xbmc.log(_print)
 
 # -- Contar las piezas contiguas completas del vídeo ------------
 def count_completed_continuous_pieces(h, piece_set):
