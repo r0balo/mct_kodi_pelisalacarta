@@ -563,10 +563,10 @@ def get_video_files_sizes( info ):
     vfile_name = {}
     vfile_size = {}
 
-    # -- Eliminar tíldes -----------------------------------------
+    # -- Eliminar errores con tíldes -----------------------------
     for i, f in enumerate( info.files() ):
-        _title = tf(f.path)
-        info.rename_file( i, _title )
+        _title = unicode(f.path, "iso-8859-1", errors="replace")
+        _title = unicode(f.path, "'utf-8'", errors="replace")
 
     extensions_list = ['.aaf', '.3gp', '.asf', '.avi', '.flv', '.mpeg',
                        '.m1v', '.m2v', '.m4v', '.mkv', '.mov', '.mpg',
