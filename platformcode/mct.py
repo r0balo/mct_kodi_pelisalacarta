@@ -44,11 +44,8 @@ import xbmcgui
 
 from core import config
 from core import scrapertools
+from core import filetools
 
-try: from platformcode.library import title_to_folder_name as tf
-except:
-    try: from platformcode.library import title_to_filename as tf
-    except: from core.filetools import title_to_filename as tf
 
 def play(url, xlistitem={}, is_view=None, subtitle=""):
 
@@ -67,11 +64,15 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
 
     DOWNLOAD_PATH = config.get_setting("downloadpath")
 
-    # -- adfly: No soportado ------------------------------------
+    # -- adfly: ------------------------------------
     if url.startswith("http://adf.ly/"):
-        ddd = xbmcgui.Dialog()
-        ddd.ok( "pelisalacarta-MCT: Sin soporte adf.ly", "El script no tiene soporte para el acortador de urls adf.ly.", "", "url: " + url )
-        return
+        try:
+            data = scrapertools.downloadpage(url)
+            url = decode_adfly(data)
+        except:
+            ddd = xbmcgui.Dialog()
+            ddd.ok( "pelisalacarta-MCT: Sin soporte adf.ly", "El script no tiene soporte para el acortador de urls adf.ly.", "", "url: " + url )
+            return
 
     # -- Necesario para algunas webs ----------------------------
     if not url.endswith(".torrent") and not url.startswith("magnet"):
@@ -87,14 +88,14 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
     save_path_torrents = os.path.join( DOWNLOAD_PATH , "torrent-torrents" )
     if not os.path.exists( save_path_torrents ): os.mkdir(save_path_torrents)
 
-    # -- Usar - archivo torrent desde web, meagnet o HD ---------
+    # -- Usar - archivo torrent desde web, magnet o HD ---------
     if not os.path.isfile(url) and not url.startswith("magnet"):
         # -- http - crear archivo torrent -----------------------
         data = url_get(url)
         # -- El nombre del torrent será el que contiene en los --
         # -- datos.                                             -
-        re_name = tf( urllib.unquote( scrapertools.get_match(data,':name\d+:(.*?)\d+:') ) )
-        torrent_file = os.path.join(save_path_torrents, unicode(re_name, "'utf-8'", errors="replace")+'.torrent')
+        re_name = urllib.unquote( scrapertools.get_match(data,':name\d+:(.*?)\d+:') )
+        torrent_file = filetools.join(save_path_torrents, filetools.encode(re_name + '.torrent'))
 
         f = open(torrent_file,'wb')
         f.write(data)
@@ -118,36 +119,25 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
 
     ses.add_dht_router("router.bittorrent.com",6881)
     ses.add_dht_router("router.utorrent.com",6881)
-    ses.add_dht_router("router.bitcomet.com",554)
     ses.add_dht_router("dht.transmissionbt.com",6881)
 
     trackers = [
-        "http://exodus.desync.com:6969/announce",
-        "udp://tracker.publicbt.com:80/announce",
         "udp://tracker.openbittorrent.com:80/announce",
         "http://tracker.torrentbay.to:6969/announce",
-        "http://fr33dom.h33t.com:3310/announce",
         "http://tracker.pow7.com/announce",
         "udp://tracker.ccc.de:80/announce",
-        "http://tracker.bittorrent.am:80/announce",
-        "http://denis.stalker.h3q.com:6969/announce",
-        "udp://tracker.prq.to:80/announce",
-        "udp://tracker.istole.it:80/announce",
         "udp://open.demonii.com:1337",
 
         "http://9.rarbg.com:2710/announce",
-        "http://announce.torrentsmd.com:6969/announce",
         "http://bt.careland.com.cn:6969/announce",
         "http://explodie.org:6969/announce",
         "http://mgtracker.org:2710/announce",
         "http://tracker.best-torrents.net:6969/announce",
         "http://tracker.tfile.me/announce",
-        "http://tracker.torrenty.org:6969/announce",
         "http://tracker1.wasabii.com.tw:6969/announce",
         "udp://9.rarbg.com:2710/announce",
         "udp://9.rarbg.me:2710/announce",
         "udp://coppersurfer.tk:6969/announce",
-        "udp://tracker.btzoo.eu:80/announce",
 
         "http://www.spanishtracker.com:2710/announce",
         "http://www.todotorrents.com:2710/announce",
@@ -164,7 +154,12 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
                 torrent_file = os.path.join(save_path_torrents, file)
 
     if torrent_file.startswith("magnet"):
-        tempdir = tempfile.mkdtemp()
+        try:
+            tempdir = tempfile.mkdtemp()
+        except IOError:
+            tempdir = os.path.join(save_path_torrents , "temp")
+            if not os.path.exists(tempdir):
+                os.mkdir(tempdir)
         params = {
             'save_path': tempdir,
             'trackers':trackers,
@@ -704,3 +699,16 @@ def set_priority_pieces(h, _index, video_file, video_size,
             h.set_piece_deadline(piece_set[i],10000)
 
     return piece_set
+
+
+def decode_adfly(data):
+    import base64
+    ysmm = scrapertools.find_single_match(data, "var ysmm = '([^']+)'")
+    left = ''
+    right = ''
+    for c in [ysmm[i:i+2] for i in range(0, len(ysmm), 2)]:
+        left += c[0]
+        right = c[1] + right
+
+    decoded_url = base64.b64decode(left.encode() + right.encode())[2:].decode()
+    return decoded_url
