@@ -306,7 +306,7 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
             ren_video_file = os.path.join( save_path_videos, video_file )
             playlist.add( ren_video_file, xlistitem )
 
-            player = play_video( xbmc.PLAYER_CORE_AUTO )
+            player = play_video()
             player.play(playlist)
 
             # -- Contador de cancelaciones para la ventana de   -
