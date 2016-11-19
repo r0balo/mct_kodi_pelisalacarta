@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
 # ------------------------------------------------------------
-# pelisalacarta
+# pelisalacarta 4
 # Copyright 2015 tvalacarta@gmail.com
 # http://blog.tvalacarta.info/plugin-xbmc/pelisalacarta/
 #
 # Distributed under the terms of GNU General Public License v3 (GPLv3)
 # http://www.gnu.org/licenses/gpl-3.0.html
 # ------------------------------------------------------------
-# This file is part of pelisalacarta
+# This file is part of pelisalacarta 4.
 #
-# pelisalacarta is free software: you can redistribute it and/or modify
+# pelisalacarta 4 is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# pelisalacarta is distributed in the hope that it will be useful,
+# pelisalacarta 4 is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with pelisalacarta. If not, see <http://www.gnu.org/licenses/>.
+# along with pelisalacarta 4.  If not, see <http://www.gnu.org/licenses/>.
 # ------------------------------------------------------------
 # MCT - Mini Cliente Torrent para pelisalacarta
 #------------------------------------------------------------
@@ -51,6 +51,14 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
 
     allocate = True
     try:
+        import platform
+        xbmc.log("XXX KODI XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+        xbmc.log("OS platform: %s %s" % (platform.system(),platform.release()))
+        xbmc.log("xbmc/kodi version: %s" % xbmc.getInfoLabel( "System.BuildVersion" ))
+        xbmc_version = int(xbmc.getInfoLabel( "System.BuildVersion" )[:2])
+        xbmc.log("xbmc/kodi version number: %s" % xbmc_version)
+        xbmc.log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX KODI XXXX")
+
         _platform = get_platform()
         if str(_platform['system']) in ["android_armv7", "linux_armv6", "linux_armv7"]:
             allocate = False
@@ -172,7 +180,6 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
         dp = xbmcgui.DialogProgress()
         dp.create('pelisalacarta-MCT')
         while not h.has_metadata():
-            h.force_dht_announce()
             message, porcent, msg_file, s, download = getProgress(h, "Creando torrent desde magnet")
             dp.update(porcent, message, msg_file)
             if s.state == 1: download = 1
@@ -180,6 +187,9 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
                 dp.close()
                 remove_files( download, torrent_file, video_file, ses, h )
                 return
+            h.force_dht_announce()
+            xbmc.sleep(1000)
+
         dp.close()
         info = h.get_torrent_info()
         data = lt.bencode( lt.create_torrent(info).generate() )
@@ -304,9 +314,15 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
             playlist.clear()
 
             ren_video_file = os.path.join( save_path_videos, video_file )
-            playlist.add( ren_video_file, xlistitem )
+            try:
+                playlist.add( ren_video_file, xlistitem )
+            except:
+                playlist.add( ren_video_file )
 
-            player = play_video()
+            if xbmc_version < 17:
+                player = play_video( xbmc.PLAYER_CORE_AUTO )
+            else:
+                player = play_video()
             player.play(playlist)
 
             # -- Contador de cancelaciones para la ventana de   -
