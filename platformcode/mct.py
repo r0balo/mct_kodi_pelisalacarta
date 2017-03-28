@@ -122,7 +122,7 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
 
     # -- MCT - MiniClienteTorrent -------------------------------
     ses = lt.session()
-    log("XXX % libtorrent version: %s" % lt.version)
+    log("XXX libtorrent version: %s" % lt.version)
 
     ses.add_dht_router("router.bittorrent.com",6881)
     ses.add_dht_router("router.utorrent.com",6881)
