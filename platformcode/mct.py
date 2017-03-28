@@ -55,21 +55,21 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
     allocate = True
     try:
         import platform
-        xbmc.log("XXX KODI XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-        xbmc.log("OS platform: %s %s" % (platform.system(),platform.release()))
-        xbmc.log("xbmc/kodi version: %s" % xbmc.getInfoLabel( "System.BuildVersion" ))
+        log("XXX KODI XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+        log("OS platform: %s %s" % (platform.system(),platform.release()))
+        log("xbmc/kodi version: %s" % xbmc.getInfoLabel( "System.BuildVersion" ))
         xbmc_version = int(xbmc.getInfoLabel( "System.BuildVersion" )[:2])
-        xbmc.log("xbmc/kodi version number: %s" % xbmc_version)
-        xbmc.log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX KODI XXXX")
+        log("xbmc/kodi version number: %s" % xbmc_version)
+        log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX KODI XXXX")
 
         _platform = get_platform()
         if str(_platform['system']) in ["android_armv7", "linux_armv6", "linux_armv7"]:
             allocate = False
         # -- log ------------------------------------------------
-        xbmc.log("XXX platform XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-        xbmc.log("_platform['system']: %s" % _platform['system'])
-        xbmc.log("allocate: %s" % allocate)
-        xbmc.log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX platform XXXX")
+        log("XXX platform XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+        log("_platform['system']: %s" % _platform['system'])
+        log("allocate: %s" % allocate)
+        log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX platform XXXX")
         # -- ----------------------------------------------------
     except: pass
 
@@ -88,11 +88,12 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
     # -- Necesario para algunas webs ----------------------------
     if not url.endswith(".torrent") and not url.startswith("magnet"):
         t_file = scrapertools.get_header_from_response(url, header_to_get="location")
-        if len(t_file) > 0:
-            url = t_file
-            t_file = scrapertools.get_header_from_response(url, header_to_get="location")
-        if len(t_file) > 0:
-            url = t_file
+        if t_file:
+            if len(t_file) > 0:
+                url = t_file
+                t_file = scrapertools.get_header_from_response(url, header_to_get="location")
+            if len(t_file) > 0:
+                url = t_file
 
     # -- Crear dos carpetas en descargas para los archivos ------
     save_path_videos = os.path.join( DOWNLOAD_PATH , "torrent-videos" )
@@ -121,12 +122,7 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
 
     # -- MCT - MiniClienteTorrent -------------------------------
     ses = lt.session()
-
-    # -- log ----------------------------------------------------
-    xbmc.log("### Init session ########")
-    xbmc.log(lt.version)
-    xbmc.log("#########################")
-    # -- --------------------------------------------------------
+    log("XXX % libtorrent version: %s" % lt.version)
 
     ses.add_dht_router("router.bittorrent.com",6881)
     ses.add_dht_router("router.utorrent.com",6881)
@@ -215,7 +211,7 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
     # -- El más gordo o uno de los más gordo se entiende que es -
     # -- el vídeo o es el vídeo que se usará como referencia    -
     # -- para el tipo de archivo                                -
-    xbmc.log("##### Archivos ## %s ##" % len(info.files()))
+    log("##### Archivos ## %s ##" % len(info.files()))
     _index_file, _video_file, _size_file = get_video_file(info)
 
     # -- Prioritarizar/Seleccionar archivo-----------------------
@@ -229,12 +225,12 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
         video_size = _size_file
 
     _video_file_ext = os.path.splitext( _video_file )[1]
-    xbmc.log("##### _video_file_ext ## %s ##" % _video_file_ext)
+    log("##### _video_file_ext ## %s ##" % _video_file_ext)
     if (_video_file_ext == ".avi" or _video_file_ext == ".mp4") and allocate:
-        xbmc.log("##### storage_mode_t.storage_mode_allocate ("+_video_file_ext+") #####")
+        log("##### storage_mode_t.storage_mode_allocate ("+_video_file_ext+") #####")
         h = ses.add_torrent( { 'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_allocate } )
     else:
-        xbmc.log("##### storage_mode_t.storage_mode_sparse ("+_video_file_ext+") #####")
+        log("##### storage_mode_t.storage_mode_sparse ("+_video_file_ext+") #####")
         h = ses.add_torrent( { 'ti':info, 'save_path': save_path_videos, 'trackers':trackers, 'storage_mode':lt.storage_mode_t.storage_mode_sparse } )
         allocate = True
     # -----------------------------------------------------------
@@ -260,9 +256,9 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
     if num_pieces_to_resume < 5: num_pieces_to_resume = 5
     if num_pieces_to_resume > 25: num_pieces_to_resume = 25
 
-    xbmc.log("##### porcent4first_pieces ## %s ##" % porcent4first_pieces)
-    xbmc.log("##### porcent4last_pieces ## %s ##" % porcent4last_pieces)
-    xbmc.log("##### num_pieces_to_resume ## %s ##" % num_pieces_to_resume)
+    log("##### porcent4first_pieces ## %s ##" % porcent4first_pieces)
+    log("##### porcent4last_pieces ## %s ##" % porcent4last_pieces)
+    log("##### num_pieces_to_resume ## %s ##" % num_pieces_to_resume)
 
     # -- Prioritarizar o seleccionar las piezas del archivo que -
     # -- se desea reproducir con 'file_priorities'              -
@@ -311,7 +307,7 @@ def play(url, xlistitem={}, is_view=None, subtitle=""):
 
         if is_view != "Ok" and first_pieces and last_pieces:
             _pieces_info['continuous2'] = ""
-            xbmc.log("##### porcent [%.2f%%]" % (s.progress * 100))
+            log("##### porcent [%.2f%%]" % (s.progress * 100))
             is_view = "Ok"
             dp.close()
 
@@ -650,15 +646,15 @@ def remove_files( download, torrent_file, video_file, ses, h ):
                 os.remove( torrent_file )
             # -- Borrar carpeta/archivos y sesión - vídeo -------
             ses.remove_torrent( h, 1 )
-            xbmc.log("### End session #########")
+            log("### End session #########")
         else:
             # -- Borrar sesión ----------------------------------
             ses.remove_torrent( h )
-            xbmc.log("### End session #########")
+            log("### End session #########")
     else:
         # -- Borrar sesión --------------------------------------
         ses.remove_torrent( h )
-        xbmc.log("### End session #########")
+        log("### End session #########")
 
     return
 
@@ -734,3 +730,6 @@ def decode_adfly(data):
 
     decoded_url = base64.b64decode(left.encode() + right.encode())[2:].decode()
     return decoded_url
+
+def log(texto):
+    xbmc.log(texto, xbmc.LOGNOTICE)
